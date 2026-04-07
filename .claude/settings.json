@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e \"const s = require\\('stripe'\\); console.log\\(typeof s, typeof s.default\\)\")",
+      "Bash(rm \"c:/Users/pierr/Desktop/strapi project/cashi-back/src/api/subscription/services/izipay.ts\")",
+      "Bash(rm \"c:/Users/pierr/Desktop/NextJs Projects/cashi/components/pricing/IzipayForm.tsx\")",
+      "Bash(rm \"c:/Users/pierr/Desktop/NextJs Projects/cashi/app/api/izipay/token/route.ts\")"
+    ]
+  }
+}

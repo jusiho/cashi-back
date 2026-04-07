@@ -1,0 +1,31 @@
+{
+  "kind": "collectionType",
+  "collectionName": "savings",
+  "info": {
+    "singularName": "saving",
+    "pluralName": "savings",
+    "displayName": "Saving",
+    "description": "Savings entries linked to accounts"
+  },
+  "options": { "draftAndPublish": false },
+  "attributes": {
+    "name": { "type": "string", "required": true, "maxLength": 100 },
+    "amount": { "type": "decimal", "required": true, "default": 0 },
+    "targetAmount": { "type": "decimal", "default": 0 },
+    "currency": { "type": "string", "default": "USD", "maxLength": 3 },
+    "date": { "type": "date", "required": true },
+    "notes": { "type": "text" },
+    "icon": { "type": "string", "default": "piggy-bank" },
+    "color": { "type": "string", "default": "#10B981" },
+    "account": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::account.account"
+    },
+    "user": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "plugin::users-permissions.user"
+    }
+  }
+}

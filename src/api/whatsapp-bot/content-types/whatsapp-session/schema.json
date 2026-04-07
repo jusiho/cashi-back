@@ -1,0 +1,38 @@
+{
+  "kind": "collectionType",
+  "collectionName": "whatsapp_sessions",
+  "info": {
+    "singularName": "whatsapp-session",
+    "pluralName": "whatsapp-sessions",
+    "displayName": "WhatsApp Session",
+    "description": "Conversation sessions for WhatsApp bot users"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "attributes": {
+    "phoneNumber": {
+      "type": "string",
+      "required": true,
+      "unique": true,
+      "maxLength": 20
+    },
+    "state": {
+      "type": "string",
+      "required": true,
+      "default": "INIT",
+      "maxLength": 50
+    },
+    "sessionData": {
+      "type": "json"
+    },
+    "user": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "plugin::users-permissions.user"
+    },
+    "lastActivity": {
+      "type": "datetime"
+    }
+  }
+}

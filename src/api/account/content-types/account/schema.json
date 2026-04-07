@@ -1,0 +1,66 @@
+{
+  "kind": "collectionType",
+  "collectionName": "accounts",
+  "info": {
+    "singularName": "account",
+    "pluralName": "accounts",
+    "displayName": "Account",
+    "description": "Financial accounts (checking, savings, credit, investment)"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "attributes": {
+    "name": {
+      "type": "string",
+      "required": true,
+      "minLength": 2,
+      "maxLength": 100
+    },
+    "type": {
+      "type": "enumeration",
+      "enum": ["checking", "savings", "credit", "investment", "cash"],
+      "required": true,
+      "default": "checking"
+    },
+    "balance": {
+      "type": "decimal",
+      "default": 0,
+      "required": true
+    },
+    "currency": {
+      "type": "string",
+      "default": "USD",
+      "maxLength": 3
+    },
+    "color": {
+      "type": "string",
+      "default": "#10B981"
+    },
+    "isActive": {
+      "type": "boolean",
+      "default": true
+    },
+    "creditLimit": {
+      "type": "decimal",
+      "default": 0
+    },
+    "bank": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::bank.bank",
+      "inversedBy": "accounts"
+    },
+    "transactions": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::transaction.transaction",
+      "mappedBy": "account"
+    },
+    "user": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "plugin::users-permissions.user"
+    }
+  }
+}

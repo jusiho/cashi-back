@@ -1,0 +1,73 @@
+{
+  "kind": "collectionType",
+  "collectionName": "transactions",
+  "info": {
+    "singularName": "transaction",
+    "pluralName": "transactions",
+    "displayName": "Transaction",
+    "description": "Financial transactions (income, expense, transfer)"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "attributes": {
+    "amount": {
+      "type": "decimal",
+      "required": true
+    },
+    "type": {
+      "type": "enumeration",
+      "enum": ["income", "expense", "transfer"],
+      "required": true,
+      "default": "expense"
+    },
+    "description": {
+      "type": "string",
+      "required": true,
+      "maxLength": 255
+    },
+    "date": {
+      "type": "datetime",
+      "required": true
+    },
+    "notes": {
+      "type": "text"
+    },
+    "attachments": {
+      "type": "media",
+      "multiple": true,
+      "required": false,
+      "allowedTypes": ["images", "files"]
+    },
+    "whatsappMessageId": {
+      "type": "string",
+      "maxLength": 100
+    },
+    "isRecurring": {
+      "type": "boolean",
+      "default": false
+    },
+    "account": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::account.account",
+      "inversedBy": "transactions"
+    },
+    "destinationAccount": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::account.account"
+    },
+    "category": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::category.category",
+      "inversedBy": "transactions"
+    },
+    "user": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "plugin::users-permissions.user"
+    }
+  }
+}

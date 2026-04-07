@@ -1,0 +1,45 @@
+{
+  "kind": "collectionType",
+  "collectionName": "goals",
+  "info": {
+    "singularName": "goal",
+    "pluralName": "goals",
+    "displayName": "Goal",
+    "description": "Financial goals (monthly or annual)"
+  },
+  "options": { "draftAndPublish": false },
+  "attributes": {
+    "name": { "type": "string", "required": true, "maxLength": 100 },
+    "type": {
+      "type": "enumeration",
+      "enum": ["saving", "expense_limit", "income_target", "debt_payment"],
+      "required": true,
+      "default": "saving"
+    },
+    "period": {
+      "type": "enumeration",
+      "enum": ["monthly", "annual"],
+      "required": true,
+      "default": "monthly"
+    },
+    "targetAmount": { "type": "decimal", "required": true, "default": 0 },
+    "currentAmount": { "type": "decimal", "default": 0 },
+    "currency": { "type": "string", "default": "USD", "maxLength": 3 },
+    "startDate": { "type": "date", "required": true },
+    "endDate": { "type": "date", "required": true },
+    "icon": { "type": "string", "default": "target" },
+    "color": { "type": "string", "default": "#10B981" },
+    "isCompleted": { "type": "boolean", "default": false },
+    "notes": { "type": "text" },
+    "category": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::category.category"
+    },
+    "user": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "plugin::users-permissions.user"
+    }
+  }
+}

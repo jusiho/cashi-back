@@ -1,0 +1,56 @@
+{
+  "kind": "collectionType",
+  "collectionName": "assets",
+  "info": {
+    "singularName": "asset",
+    "pluralName": "assets",
+    "displayName": "Asset",
+    "description": "Financial assets (real estate, investments, vehicles, etc.)"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "attributes": {
+    "name": {
+      "type": "string",
+      "required": true,
+      "minLength": 2,
+      "maxLength": 100
+    },
+    "type": {
+      "type": "enumeration",
+      "enum": ["real_estate", "investment", "vehicle", "business", "crypto", "other"],
+      "required": true,
+      "default": "other"
+    },
+    "currentValue": {
+      "type": "decimal",
+      "required": true,
+      "default": 0
+    },
+    "acquisitionValue": {
+      "type": "decimal",
+      "default": 0
+    },
+    "acquisitionDate": {
+      "type": "date"
+    },
+    "description": {
+      "type": "text"
+    },
+    "currency": {
+      "type": "string",
+      "default": "USD",
+      "maxLength": 3
+    },
+    "isActive": {
+      "type": "boolean",
+      "default": true
+    },
+    "user": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "plugin::users-permissions.user"
+    }
+  }
+}

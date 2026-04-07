@@ -1,0 +1,72 @@
+{
+  "kind": "collectionType",
+  "collectionName": "liabilities",
+  "info": {
+    "singularName": "liability",
+    "pluralName": "liabilities",
+    "displayName": "Liability",
+    "description": "Financial liabilities (loans, mortgages, credit card debt, etc.)"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "attributes": {
+    "name": {
+      "type": "string",
+      "required": true,
+      "minLength": 2,
+      "maxLength": 100
+    },
+    "type": {
+      "type": "enumeration",
+      "enum": ["mortgage", "personal_loan", "credit_card", "student_loan", "auto_loan", "other"],
+      "required": true,
+      "default": "other"
+    },
+    "balance": {
+      "type": "decimal",
+      "required": true,
+      "default": 0
+    },
+    "originalAmount": {
+      "type": "decimal",
+      "default": 0
+    },
+    "interestRate": {
+      "type": "decimal",
+      "default": 0
+    },
+    "minimumPayment": {
+      "type": "decimal",
+      "default": 0
+    },
+    "dueDate": {
+      "type": "date"
+    },
+    "startDate": {
+      "type": "date"
+    },
+    "description": {
+      "type": "text"
+    },
+    "currency": {
+      "type": "string",
+      "default": "USD",
+      "maxLength": 3
+    },
+    "isActive": {
+      "type": "boolean",
+      "default": true
+    },
+    "account": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::account.account"
+    },
+    "user": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "plugin::users-permissions.user"
+    }
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "kind": "collectionType",
+  "collectionName": "recurring_expenses",
+  "info": {
+    "singularName": "recurring-expense",
+    "pluralName": "recurring-expenses",
+    "displayName": "RecurringExpense",
+    "description": "Recurring expenses (subscriptions, rent, utilities)"
+  },
+  "options": { "draftAndPublish": false },
+  "attributes": {
+    "name": { "type": "string", "required": true, "maxLength": 100 },
+    "amount": { "type": "decimal", "required": true },
+    "currency": { "type": "string", "default": "USD", "maxLength": 3 },
+    "frequency": {
+      "type": "enumeration",
+      "enum": ["daily", "weekly", "biweekly", "monthly", "quarterly", "annual"],
+      "required": true,
+      "default": "monthly"
+    },
+    "nextDueDate": { "type": "date", "required": true },
+    "startDate": { "type": "date" },
+    "isActive": { "type": "boolean", "default": true },
+    "icon": { "type": "string", "default": "repeat" },
+    "color": { "type": "string", "default": "#8B5CF6" },
+    "notes": { "type": "text" },
+    "account": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::account.account"
+    },
+    "category": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::category.category"
+    },
+    "user": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "plugin::users-permissions.user"
+    }
+  }
+}
