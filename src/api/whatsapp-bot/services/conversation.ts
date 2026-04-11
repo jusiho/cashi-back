@@ -237,7 +237,6 @@ export default ({ strapi }) => {
     session: any,
     phoneNumber: string,
     input: string,
-    msgType: string
   ) {
     // If session already has a linked user, go straight to main menu
     if (session.user) {
@@ -307,11 +306,81 @@ export default ({ strapi }) => {
     }
 
     const data: SessionData = { ...session.sessionData, email };
-    await updateSession(session.id, { state: 'REGISTER_CURRENCY', sessionData: data });
+    await updateSession(session.id, { state: 'REGISTER_CURRENCY_TYPE', sessionData: data });
 
+    await sender.sendButtons(
+      phoneNumber,
+      `✅ Correo guardado.\n\n¿Cómo quieres manejar tus monedas?`,
+      [
+        { id: 'cur_type_single', title: '💵 Una moneda' },
+        { id: 'cur_type_multi',  title: '🌐 Varias monedas' },
+      ]
+    );
+  }
+
+  async function createUserAndFinish(session: any, phoneNumber: string, data: SessionData) {
+    const name = data.name || 'Usuario';
+    const currency = data.currency || 'USD';
+
+    let user: any;
+    try {
+      const role = await strapi.db
+        .query('plugin::users-permissions.role')
+        .findOne({ where: { type: 'authenticated' } });
+
+      const tempPassword = Math.random().toString(36).substring(2, 8).toUpperCase() +
+        Math.random().toString(36).substring(2, 5) + '1!';
+
+      user = await strapi.plugin('users-permissions').service('user').add({
+        username: name,
+        email: data.email || `wa_${phoneNumber}@cashi.app`,
+        password: tempPassword,
+        provider: 'local',
+        confirmed: true,
+        blocked: false,
+        role: role?.id,
+        phoneNumber,
+        registrationSource: 'whatsapp',
+      });
+
+      (data as any)._tempPassword = tempPassword;
+    } catch (err) {
+      strapi.log.error('[WhatsApp] Error creating user:', err);
+      await sender.sendText(phoneNumber, '❌ Hubo un error al crear tu cuenta. Por favor escribe *hola* para intentar de nuevo.');
+      return;
+    }
+
+    await seedUserData(user.id, currency === 'MULTI' ? 'USD' : currency);
+
+    await updateSession(session.id, { state: 'MAIN_MENU', sessionData: data, user: user.id });
+
+    const webUrl = process.env.NEXTJS_URL || 'http://localhost:3000';
+    const tempPwd = (data as any)._tempPassword;
+
+    await sender.sendText(
+      phoneNumber,
+      `🎉 *¡Cuenta creada exitosamente!*\n\nBienvenido a *Cashi*, ${name}! 🎊\n\n` +
+      `📱 Puedes gestionar tus finanzas aquí por WhatsApp.\n\n` +
+      `💻 *También puedes entrar a la web:*\n` +
+      `🔗 ${webUrl}\n` +
+      `📧 Email: ${data.email}\n` +
+      `🔑 Contraseña temporal: *${tempPwd}*\n\n` +
+      `⚠️ _Guarda esta contraseña. Puedes cambiarla en Configuración → Perfil._`
+    );
+    await sendMainMenu(phoneNumber, name);
+  }
+
+  async function handleRegisterCurrencyType(session: any, phoneNumber: string, buttonId: string) {
+    if (buttonId === 'cur_type_multi') {
+      const data: SessionData = { ...session.sessionData, currency: 'MULTI' };
+      await createUserAndFinish(session, phoneNumber, data);
+      return;
+    }
+    // Single currency → show list
+    await updateSession(session.id, { state: 'REGISTER_CURRENCY' });
     await sender.sendList(
       phoneNumber,
-      `✅ Correo guardado.\n\n¿Cuál es tu moneda principal?`,
+      `💵 ¿Cuál es tu moneda principal?`,
       'Seleccionar moneda',
       [{ title: 'Monedas disponibles', rows: CURRENCIES }]
     );
@@ -322,50 +391,17 @@ export default ({ strapi }) => {
       await sender.sendText(phoneNumber, 'Por favor selecciona una moneda de la lista.');
       return;
     }
-
     const currency = buttonId.replace('cur_', '');
     const data: SessionData = { ...session.sessionData, currency };
-    const name = data.name || 'Usuario';
-
-    // Create Strapi user
-    let user: any;
-    try {
-      const role = await strapi.db
-        .query('plugin::users-permissions.role')
-        .findOne({ where: { type: 'authenticated' } });
-
-      user = await strapi.plugin('users-permissions').service('user').add({
-        username: name,
-        email: data.email || `wa_${phoneNumber}@cashi.app`,
-        password: Math.random().toString(36).substring(2, 10) + 'Aa1!',
-        provider: 'local',
-        confirmed: true,
-        blocked: false,
-        role: role?.id,
-      });
-    } catch (err) {
-      strapi.log.error('[WhatsApp] Error creating user:', err);
-      await sender.sendText(
-        phoneNumber,
-        '❌ Hubo un error al crear tu cuenta. Por favor escribe *hola* para intentar de nuevo.'
-      );
-      return;
-    }
-
-    await seedUserData(user.id, currency);
-
-    await updateSession(session.id, {
-      state: 'MAIN_MENU',
-      sessionData: data,
-      user: user.id,
-    });
-
-    await sender.sendText(
-      phoneNumber,
-      `🎉 *¡Cuenta creada exitosamente!*\n\nBienvenido a *Cashi*, ${name}! 🎊\n\nYa puedes gestionar tus finanzas desde WhatsApp.`
-    );
-    await sendMainMenu(phoneNumber, name);
+    await createUserAndFinish(session, phoneNumber, data);
   }
+
+  const MENU_TRIGGERS = new Set([
+    'hola', 'hi', 'hello', 'hey', 'buenas', 'buenos días', 'buenos dias',
+    'buenas tardes', 'buenas noches', 'menu', 'menú', 'inicio', 'start',
+    'empezar', 'volver', 'regresar', 'opciones', 'ayuda', 'help', '.',
+    'ok', 'ок', '👋',
+  ]);
 
   async function handleMainMenu(session: any, phoneNumber: string, input: string) {
     const name = session.user?.username || 'Usuario';
@@ -413,13 +449,14 @@ export default ({ strapi }) => {
       return;
     }
 
-    // Unknown text input → try AI parsing
-    if (input && input.length > 1) {
-      await handleAIMessage(session, phoneNumber, input);
+    // Saludos / palabras de menú → mostrar menú directamente
+    if (!input || MENU_TRIGGERS.has(input.trim().toLowerCase())) {
+      await sendMainMenu(phoneNumber, name);
       return;
     }
 
-    await sendMainMenu(phoneNumber, name);
+    // Texto libre → intentar parsear con IA
+    await handleAIMessage(session, phoneNumber, input);
   }
 
   async function handleAdvisor(session: any, phoneNumber: string, userMessage: string) {
@@ -436,7 +473,6 @@ export default ({ strapi }) => {
       return;
     }
 
-    await sender.sendText(phoneNumber, '🤔 _Analizando..._');
 
     // Build financial context
     const now = new Date();
@@ -530,7 +566,6 @@ export default ({ strapi }) => {
       categories: categories.map((c: any) => ({ name: c.name, type: c.type })),
     };
 
-    await sender.sendText(phoneNumber, '🤔 _Procesando..._');
 
     const aiService = strapi.service('api::whatsapp-bot.ai');
     const intent = await aiService.parseIntent(userMessage, context);
@@ -886,7 +921,7 @@ export default ({ strapi }) => {
       try {
         switch (state) {
           case 'INIT':
-            return await handleInit(session, phoneNumber, input, msgType);
+            return await handleInit(session, phoneNumber, input);
 
           case 'REGISTER_NAME':
             if (msgType !== 'text') {
@@ -905,6 +940,9 @@ export default ({ strapi }) => {
               return await sendWelcome(phoneNumber);
             }
             return await handleRegisterEmail(session, phoneNumber, msgText);
+
+          case 'REGISTER_CURRENCY_TYPE':
+            return await handleRegisterCurrencyType(session, phoneNumber, input);
 
           case 'REGISTER_CURRENCY':
             return await handleRegisterCurrency(session, phoneNumber, input);

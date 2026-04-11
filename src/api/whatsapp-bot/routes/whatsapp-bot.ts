@@ -12,6 +12,40 @@
 export default {
   routes: [
     {
+      method: 'POST',
+      path: '/whatsapp/otp/request',
+      handler: 'whatsapp-bot.requestOtp',
+      config: {
+        auth: false,
+        policies: [],
+        middlewares: [],
+        tags: ['no-document-service-authorization'],
+      },
+    },
+    {
+      method: 'POST',
+      path: '/whatsapp/otp/verify',
+      handler: 'whatsapp-bot.verifyOtp',
+      config: {
+        auth: false,
+        policies: [],
+        middlewares: [],
+        tags: ['no-document-service-authorization'],
+      },
+    },
+    {
+      method: 'GET',
+      path: '/whatsapp/me',
+      handler: 'whatsapp-bot.getMySession',
+      config: { policies: [], middlewares: [] },
+    },
+    {
+      method: 'DELETE',
+      path: '/whatsapp/me',
+      handler: 'whatsapp-bot.unlinkSession',
+      config: { policies: [], middlewares: [] },
+    },
+    {
       method: 'GET',
       path: '/whatsapp/webhook',
       handler: 'whatsapp-bot.verify',

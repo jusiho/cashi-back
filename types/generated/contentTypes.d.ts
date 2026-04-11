@@ -1489,8 +1489,12 @@ export interface PluginUsersPermissionsUser
       Schema.Attribute.SetMinMaxLength<{
         minLength: 6;
       }>;
+    phoneNumber: Schema.Attribute.String & Schema.Attribute.Configurable;
     provider: Schema.Attribute.String;
     publishedAt: Schema.Attribute.DateTime;
+    registrationSource: Schema.Attribute.Enumeration<['web', 'whatsapp']> &
+      Schema.Attribute.Configurable &
+      Schema.Attribute.DefaultTo<'web'>;
     resetPasswordToken: Schema.Attribute.String & Schema.Attribute.Private;
     role: Schema.Attribute.Relation<
       'manyToOne',
