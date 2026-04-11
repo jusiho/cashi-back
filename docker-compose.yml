@@ -1,0 +1,93 @@
+version: '3.9'
+
+services:
+  # ── PostgreSQL ──────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB:-cashi}
+      POSTGRES_USER:     ${POSTGRES_USER:-cashi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cashi}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Strapi ──────────────────────────────────────────────────────
+  strapi:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV:          production
+
+      # Database
+      DATABASE_CLIENT:   postgres
+      DATABASE_HOST:     postgres
+      DATABASE_PORT:     5432
+      DATABASE_NAME:     ${POSTGRES_DB:-cashi}
+      DATABASE_USERNAME: ${POSTGRES_USER:-cashi}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      DATABASE_SSL:      false
+
+      # Strapi secrets (generate with: openssl rand -base64 32)
+      APP_KEYS:          ${APP_KEYS:?APP_KEYS is required}
+      API_TOKEN_SALT:    ${API_TOKEN_SALT:?API_TOKEN_SALT is required}
+      ADMIN_JWT_SECRET:  ${ADMIN_JWT_SECRET:?ADMIN_JWT_SECRET is required}
+      JWT_SECRET:        ${JWT_SECRET:?JWT_SECRET is required}
+      TRANSFER_TOKEN_SALT: ${TRANSFER_TOKEN_SALT:-changeme}
+
+      # WhatsApp Cloud API
+      WHATSAPP_TOKEN:           ${WHATSAPP_TOKEN:-}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+      WHATSAPP_API_VERSION:     ${WHATSAPP_API_VERSION:-v22.0}
+      WHATSAPP_VERIFY_TOKEN:    ${WHATSAPP_VERIFY_TOKEN:-}
+
+      # OpenAI
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+
+      # Stripe
+      STRIPE_SECRET_KEY:      ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET:  ${STRIPE_WEBHOOK_SECRET:-}
+
+      # App URL (used for absolute links in messages)
+      APP_URL: ${APP_URL:-http://localhost:3000}
+
+    ports:
+      - "${STRAPI_PORT:-1337}:1337"
+    volumes:
+      - strapi_uploads:/app/public/uploads
+
+  # ── Next.js ─────────────────────────────────────────────────────
+  nextjs:
+    build:
+      context: "../../NextJs Projects/cashi"
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_STRAPI_URL: ${NEXT_PUBLIC_STRAPI_URL:-http://strapi:1337}
+    restart: unless-stopped
+    depends_on:
+      - strapi
+    environment:
+      # Runtime env vars (server-side only)
+      STRAPI_URL:    http://strapi:1337
+      NEXTAUTH_URL:  ${NEXTAUTH_URL:?NEXTAUTH_URL is required}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?NEXTAUTH_SECRET is required}
+
+      # Public vars are baked in at build time (see ARG above)
+      # but you can override them here if using next/headers or server actions
+      NEXT_PUBLIC_STRAPI_URL: ${NEXT_PUBLIC_STRAPI_URL:-http://strapi:1337}
+    ports:
+      - "${NEXTJS_PORT:-3000}:3000"
+
+volumes:
+  postgres_data:
+  strapi_uploads:
