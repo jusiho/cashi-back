@@ -69,7 +69,7 @@ services:
   # ── Next.js ─────────────────────────────────────────────────────
   nextjs:
     build:
-      context: "../../NextJs Projects/cashi"
+      context: ../cashi
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_STRAPI_URL: ${NEXT_PUBLIC_STRAPI_URL:-http://strapi:1337}
