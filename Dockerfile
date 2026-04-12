@@ -1,48 +1,42 @@
-# ── Stage 1: deps ───────────────────────────────────────────────
-FROM node:20-alpine AS deps
-WORKDIR /app
+FROM node:20-alpine AS build
 
-RUN apk add --no-cache libc6-compat python3 make g++
+RUN apk update && apk add --no-cache \
+  build-base \
+  gcc \
+  autoconf \
+  automake \
+  zlib-dev \
+  libpng-dev \
+  vips-dev \
+  git \
+  python3
+
+WORKDIR /opt/
 
 COPY package*.json ./
 RUN npm ci --legacy-peer-deps
 
-# ── Stage 2: build ──────────────────────────────────────────────
-FROM node:20-alpine AS builder
-WORKDIR /app
+ENV PATH=/opt/node_modules/.bin:$PATH
 
-RUN apk add --no-cache libc6-compat python3 make g++
-
-COPY --from=deps /app/node_modules ./node_modules
+WORKDIR /opt/app
 COPY . .
 
-ENV NODE_ENV=production
+RUN npm run build
 
-# Compile TypeScript (config/, src/, database/) → dist/
-# then build the Strapi admin panel
-RUN npx tsc && npm run build
 
-# ── Stage 3: runner ─────────────────────────────────────────────
-FROM node:20-alpine AS runner
-WORKDIR /app
+FROM node:20-alpine
 
-RUN apk add --no-cache libc6-compat
+RUN apk add --no-cache vips-dev
 
 ENV NODE_ENV=production
+WORKDIR /opt/
 
-RUN addgroup --system --gid 1001 strapi && \
-    adduser  --system --uid 1001 strapi
+COPY --from=build /opt/node_modules ./node_modules
 
-COPY --from=builder --chown=strapi:strapi /app/package*.json ./
-COPY --from=builder --chown=strapi:strapi /app/node_modules  ./node_modules
-# dist/ contains compiled config/, src/, database/ + admin panel
-COPY --from=builder --chown=strapi:strapi /app/dist          ./dist
-# public/ for static files & uploads (no TS here)
-COPY --from=builder --chown=strapi:strapi /app/public        ./public
+WORKDIR /opt/app
+COPY --from=build /opt/app ./
 
-RUN mkdir -p .tmp && chown -R strapi:strapi .tmp
-
-USER strapi
+ENV PATH=/opt/node_modules/.bin:$PATH
 
 EXPOSE 1337
 
