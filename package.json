@@ -22,6 +22,7 @@
     "@stripe/stripe-js": "^9.0.1",
     "better-sqlite3": "12.8.0",
     "openai": "^6.33.0",
+    "pg": "^8.20.0",
     "react": "^18.0.0",
     "react-dom": "^18.0.0",
     "react-router-dom": "^6.0.0",
