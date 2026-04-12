@@ -18,7 +18,9 @@ COPY . .
 
 ENV NODE_ENV=production
 
-RUN npm run build
+# Compile TypeScript (config/, src/, database/) → dist/
+# then build the Strapi admin panel
+RUN npx tsc && npm run build
 
 # ── Stage 3: runner ─────────────────────────────────────────────
 FROM node:20-alpine AS runner
@@ -33,12 +35,10 @@ RUN addgroup --system --gid 1001 strapi && \
 
 COPY --from=builder --chown=strapi:strapi /app/package*.json ./
 COPY --from=builder --chown=strapi:strapi /app/node_modules  ./node_modules
+# dist/ contains compiled config/, src/, database/ + admin panel
 COPY --from=builder --chown=strapi:strapi /app/dist          ./dist
-COPY --from=builder --chown=strapi:strapi /app/config        ./config
-COPY --from=builder --chown=strapi:strapi /app/database      ./database
+# public/ for static files & uploads (no TS here)
 COPY --from=builder --chown=strapi:strapi /app/public        ./public
-COPY --from=builder --chown=strapi:strapi /app/src           ./src
-COPY --from=builder --chown=strapi:strapi /app/types         ./types
 
 RUN mkdir -p .tmp && chown -R strapi:strapi .tmp
 
