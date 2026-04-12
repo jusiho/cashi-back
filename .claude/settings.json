@@ -8,7 +8,8 @@
       "Read(//c/Users/pierr/.cursor/projects/c-Users-pierr-Desktop-cashi-super-ia-cashi-back-code-workspace/terminals/**)",
       "Bash(xargs grep:*)",
       "Read(//c/Users/pierr/Desktop/**)",
-      "Bash(node -e \"console.log\\(require\\('crypto'\\).randomBytes\\(32\\).toString\\('base64'\\)\\)\")"
+      "Bash(node -e \"console.log\\(require\\('crypto'\\).randomBytes\\(32\\).toString\\('base64'\\)\\)\")",
+      "Bash(npm list:*)"
     ],
     "additionalDirectories": [
       "c:\\Users\\pierr\\Desktop\\strapi project\\cashi-back\\src\\extensions\\users-permissions\\content-types"
