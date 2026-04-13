@@ -34,13 +34,16 @@ async function post(payload: object): Promise<void> {
     throw new Error('Missing WHATSAPP_PHONE_NUMBER_ID or WHATSAPP_TOKEN env variables');
   }
 
+  const bodyStr = JSON.stringify(payload);
+  console.log('[WA SEND]', bodyStr);
+
   const response = await fetch(`${WA_BASE_URL}/${phoneNumberId}/messages`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(payload),
+    body: bodyStr,
   });
 
   if (!response.ok) {
@@ -109,7 +112,7 @@ const sender = {
         action: {
           button: trunc(buttonLabel, 20),
           sections: sections.map((s) => ({
-            title: s.title,
+            title: s.title ? trunc(s.title, 24) : undefined,
             rows: s.rows.map((r) => ({
               id: r.id,
               title: trunc(r.title, 24),

@@ -210,7 +210,7 @@ ${txText}
 - Si detectas un patrón preocupante en los datos (gastos altos, saldo bajo), menciónalo.
 - Termina con una sugerencia o pregunta cuando sea relevante.
 - NO repitas la información financiera a menos que sea necesaria para la respuesta.
-- Si el usuario quiere registrar un gasto/ingreso dile que use los botones del menú principal.`;
+- Si el usuario menciona un gasto o ingreso, responde que ya lo registraste o indícale el monto si falta información.`;
 
       try {
         // Keep last 10 messages (5 exchanges) for context window efficiency
