@@ -488,13 +488,19 @@ export default ({ strapi }) => {
 
       if (input === 'btn_balance') {
         const accounts = await getUserAccounts(session.user.id);
+        const webUrl = process.env.NEXTJS_URL || 'https://cashi.la';
         if (!accounts.length) {
           await sendAdvisorButtons(phoneNumber, '📊 No tienes cuentas registradas aún.', 'general');
         } else {
           const lines = accounts
             .map((a: any) => `🏦 *${a.name}*: ${(a.balance || 0).toFixed(2)} ${a.currency || 'USD'}`)
             .join('\n');
-          await sendAdvisorButtons(phoneNumber, `📊 *Tu Saldo Actual*\n\n${lines}`, 'general');
+          await sender.sendCtaUrl(
+            phoneNumber,
+            `📊 *Tu Saldo Actual*\n\n${lines}\n\n_Ver el detalle completo en la app:_`,
+            '📱 Ir al Dashboard',
+            `${webUrl}/dashboard`
+          );
         }
         return;
       }
@@ -627,23 +633,34 @@ export default ({ strapi }) => {
     }
 
     if (intent.intent === 'view_balance') {
+      const webUrl = process.env.NEXTJS_URL || 'https://cashi.la';
       const lines = accounts.length
         ? accounts.map((a: any) => `🏦 *${a.name}*: ${(a.balance || 0).toFixed(2)} ${a.currency || 'USD'}`).join('\n')
         : 'Sin cuentas registradas.';
-      await sendAdvisorButtons(phoneNumber, `📊 *Tu Saldo Actual*\n\n${lines}`, 'general');
+      await sender.sendCtaUrl(
+        phoneNumber,
+        `📊 *Tu Saldo Actual*\n\n${lines}\n\n_Ver el detalle completo en la app:_`,
+        '📱 Ir al Dashboard',
+        `${webUrl}/dashboard`
+      );
       return;
     }
 
     if (intent.intent === 'view_summary') {
+      const webUrl = process.env.NEXTJS_URL || 'https://cashi.la';
       const month = now.toLocaleString('es-MX', { month: 'long' });
-      await sendAdvisorButtons(
+      const balance = monthlyIncome - monthlyExpenses;
+      const balanceSign = balance >= 0 ? '+' : '';
+      await sender.sendCtaUrl(
         phoneNumber,
         `📊 *Resumen de ${month}*\n\n` +
         `💰 Ingresos: *${monthlyIncome.toFixed(2)}*\n` +
         `💸 Gastos: *${monthlyExpenses.toFixed(2)}*\n` +
-        `📈 Balance: *${(monthlyIncome - monthlyExpenses).toFixed(2)}*\n\n` +
-        `📝 ${monthTx.length} transacciones este mes`,
-        'general'
+        `📈 Balance: *${balanceSign}${balance.toFixed(2)}*\n\n` +
+        `📝 ${monthTx.length} transacciones este mes\n\n` +
+        `_Ver análisis completo en la app:_`,
+        '📊 Ver mis finanzas',
+        `${webUrl}/transactions`
       );
       return;
     }

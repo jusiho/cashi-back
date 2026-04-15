@@ -94,6 +94,29 @@ const sender = {
   },
 
   /**
+   * Send a CTA URL button message (opens a URL when tapped)
+   * Uses WhatsApp's interactive cta_url type
+   */
+  async sendCtaUrl(to: string, bodyText: string, buttonText: string, url: string): Promise<void> {
+    await post({
+      messaging_product: 'whatsapp',
+      to,
+      type: 'interactive',
+      interactive: {
+        type: 'cta_url',
+        body: { text: bodyText },
+        action: {
+          name: 'cta_url',
+          parameters: {
+            display_text: trunc(buttonText, 20),
+            url,
+          },
+        },
+      },
+    });
+  },
+
+  /**
    * Send an interactive list message (up to 10 items per section)
    */
   async sendList(
