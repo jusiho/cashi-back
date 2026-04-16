@@ -7,14 +7,16 @@
  *   REGISTER_EMAIL    → Waiting for user to type their email
  *   REGISTER_CURRENCY → Waiting for currency selection (list)
  *   MAIN_MENU         → Authenticated main menu
+ *   ADVISOR           → AI advisor (free text + quick-reply buttons)
  *   EXPENSE_AMOUNT    → Waiting for expense amount (text)
  *   EXPENSE_CATEGORY  → Waiting for category selection (buttons/list)
  *   EXPENSE_ACCOUNT   → Waiting for account selection (buttons/list)
- *   EXPENSE_NOTES     → Waiting for description text (type "no" to skip)
  *   INCOME_AMOUNT     → Waiting for income amount (text)
  *   INCOME_CATEGORY   → Waiting for category selection (buttons/list)
  *   INCOME_ACCOUNT    → Waiting for account selection (buttons/list)
- *   INCOME_NOTES      → Waiting for description text (type "no" to skip)
+ *
+ * Universal escape: sending a menu trigger (hola, menú, inicio…) from
+ * any mid-flow state resets the user to MAIN_MENU / ADVISOR.
  */
 
 import sender from './sender';
@@ -23,8 +25,8 @@ import sender from './sender';
 
 export interface ParsedMessage {
   type: 'text' | 'button_reply' | 'list_reply' | 'unknown';
-  text: string;      // populated when type === 'text'
-  buttonId: string;  // populated when type === 'button_reply' | 'list_reply'
+  text: string;
+  buttonId: string;
 }
 
 interface SessionData {
@@ -41,7 +43,7 @@ interface SessionData {
   returnTo?: string;
 }
 
-// ─── Default seed data ───────────────────────────────────────────────────────
+// ─── Seed data ────────────────────────────────────────────────────────────────
 
 const DEFAULT_CATEGORIES = [
   { name: 'Comida',          icon: '🍕', color: '#EF4444', type: 'expense' },
@@ -53,12 +55,10 @@ const DEFAULT_CATEGORIES = [
   { name: 'Vida Social',     icon: '🎉', color: '#EC4899', type: 'expense' },
   { name: 'Tecnología',      icon: '💻', color: '#6366F1', type: 'expense' },
   { name: 'Salario',         icon: '💼', color: '#10B981', type: 'income'  },
-  { name: 'Freelance',       icon: '💻', color: '#3B82F6', type: 'income'  },
+  { name: 'Freelance',       icon: '🖥️', color: '#3B82F6', type: 'income'  },
   { name: 'Inversiones',     icon: '📈', color: '#8B5CF6', type: 'income'  },
 ];
 
-// WhatsApp limita 10 filas por sección — dividimos en dos
-// WhatsApp Cloud API: max 10 rows total across all sections
 const CURRENCY_SECTIONS = [
   {
     title: 'Selecciona tu moneda',
@@ -79,14 +79,27 @@ const CURRENCY_SECTIONS = [
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+/**
+ * Parse amount from natural text.
+ * Accepts: "50", "50.00", "50,00", "S/.50", "50 soles", "$50", "1500 pesos"
+ */
 function parseAmount(text: string): number | null {
-  const normalized = text.trim().replace(/,/g, '.').replace(/[^0-9.]/g, '');
-  const value = parseFloat(normalized);
+  const cleaned = text
+    .trim()
+    .replace(/soles?|pesos?|d[oó]lares?|dollars?|reais?|s\/\.?|bs\.?|\$|€/gi, '')
+    .replace(/,/g, '.')
+    .replace(/[^0-9.]/g, '');
+  const value = parseFloat(cleaned);
   return isNaN(value) || value <= 0 ? null : value;
 }
 
-function isSkip(text: string): boolean {
-  return ['no', 'n', 'skip', 'saltar', '-'].includes(text.trim().toLowerCase());
+/**
+ * Returns the display currency string.
+ * Returns empty string for MULTI (multi-currency accounts show each account's own currency).
+ */
+function displayCurrency(currency?: string): string {
+  if (!currency || currency === 'MULTI') return '';
+  return ` ${currency}`;
 }
 
 // ─── Service factory ─────────────────────────────────────────────────────────
@@ -138,7 +151,6 @@ export default ({ strapi }) => {
   }
 
   async function seedUserData(userId: number, currency: string) {
-    // Default categories
     const existing = await strapi.db.query('api::category.category').count({ where: { user: userId } });
     if (existing === 0) {
       for (const cat of DEFAULT_CATEGORIES) {
@@ -147,8 +159,6 @@ export default ({ strapi }) => {
         });
       }
     }
-
-    // Default cash account
     const accountCount = await strapi.db.query('api::account.account').count({ where: { user: userId } });
     if (accountCount === 0) {
       await strapi.db.query('api::account.account').create({
@@ -181,11 +191,11 @@ export default ({ strapi }) => {
   async function sendMainMenu(phoneNumber: string, name: string) {
     await sender.sendButtons(
       phoneNumber,
-      `💰 *Cashi* — ¿Qué deseas hacer, ${name}?`,
+      `💰 *Cashi* — ¿Qué hacemos, ${name}?`,
       [
-        { id: 'btn_expense', title: '💸 Gasto'    },
-        { id: 'btn_income',  title: '💰 Ingreso'  },
-        { id: 'btn_advisor', title: '🤖 Asesor IA' },
+        { id: 'btn_expense', title: '💸 Registrar gasto'   },
+        { id: 'btn_income',  title: '💰 Registrar ingreso' },
+        { id: 'btn_advisor', title: '🤖 Hablar con IA'     },
       ]
     );
   }
@@ -198,7 +208,8 @@ export default ({ strapi }) => {
     currency: string
   ) {
     const emoji = type === 'expense' ? '💸' : '💰';
-    const header = `${emoji} Monto: *${amount.toFixed(2)} ${currency}*\n\n¿En qué categoría?`;
+    const cur = displayCurrency(currency);
+    const header = `${emoji} Monto: *${amount.toFixed(2)}${cur}*\n\n¿En qué categoría?`;
 
     if (categories.length <= 3) {
       await sender.sendButtons(
@@ -219,15 +230,21 @@ export default ({ strapi }) => {
   async function sendAccountSelection(
     phoneNumber: string,
     accounts: any[],
-    categoryName: string
+    categoryName: string,
+    amount: number,
+    currency: string
   ) {
-    const header = `📂 Categoría: *${categoryName}*\n\n¿Desde qué cuenta?`;
+    const cur = displayCurrency(currency);
+    const header = `📂 *${categoryName}* · ${amount.toFixed(2)}${cur}\n\n¿Desde qué cuenta?`;
 
     if (accounts.length <= 3) {
       await sender.sendButtons(
         phoneNumber,
         header,
-        accounts.map((a) => ({ id: `acc_${a.id}`, title: a.name }))
+        accounts.map((a) => ({
+          id: `acc_${a.id}`,
+          title: a.name,
+        }))
       );
     } else {
       await sender.sendList(phoneNumber, header, 'Ver cuentas', [
@@ -259,19 +276,82 @@ export default ({ strapi }) => {
     }
   }
 
-  // ── State handlers ─────────────────────────────────────────────────────────
+  // ── Transaction save (shared between step-by-step and advisor flows) ────────
 
-  async function handleInit(
+  async function saveTransaction(
     session: any,
     phoneNumber: string,
-    input: string,
+    data: SessionData,
+    description: string | null
   ) {
-    // If session already has a linked user, go straight to AI advisor
+    const type = data.transactionType!;
+    const isExpense = type === 'expense';
+
+    try {
+      await strapi.db.query('api::transaction.transaction').create({
+        data: {
+          amount:     data.amount,
+          type,
+          description: description || `${isExpense ? 'Gasto' : 'Ingreso'} vía WhatsApp`,
+          date:        new Date(),
+          account:     data.accountId,
+          category:    data.categoryId,
+          user:        session.user.id,
+          whatsappMessageId: `wa_${Date.now()}`,
+        },
+      });
+
+      const account = await strapi.db.query('api::account.account').findOne({ where: { id: data.accountId } });
+      const delta      = isExpense ? -(data.amount!) : data.amount!;
+      const newBalance = (account.balance || 0) + delta;
+
+      await strapi.db.query('api::account.account').update({
+        where: { id: data.accountId },
+        data:  { balance: newBalance },
+      });
+
+      const currency = account.currency || data.currency || 'USD';
+      const cur      = displayCurrency(currency);
+      const sign     = isExpense ? '-' : '+';
+      const emoji    = isExpense ? '💸' : '💰';
+      const label    = isExpense ? 'Gasto' : 'Ingreso';
+
+      await sendAdvisorButtons(
+        phoneNumber,
+        `✅ *${label} registrado!*\n\n` +
+        `${emoji} ${sign}${data.amount!.toFixed(2)}${cur}\n` +
+        `📂 ${data.categoryName}\n` +
+        `🏦 ${data.accountName}` +
+        (description ? `\n📝 ${description}` : '') +
+        `\n\n💳 Saldo: *${newBalance.toFixed(2)}${cur}*\n\n` +
+        `_Escribe cualquier cosa o usa los botones:_`,
+        'after_tx'
+      );
+    } catch (err) {
+      strapi.log.error('[WhatsApp] Error saving transaction:', err);
+      await sender.sendText(phoneNumber, '❌ Error al registrar. Por favor intenta de nuevo.');
+    }
+
+    // Return to advisor or main menu
+    const returnTo = data.returnTo as string | undefined;
+    if (returnTo === 'ADVISOR') {
+      await updateSession(session.id, {
+        state: 'ADVISOR',
+        sessionData: { currency: data.currency, advisorHistory: session.sessionData?.advisorHistory || [] },
+      });
+    } else {
+      await updateSession(session.id, { state: 'ADVISOR', sessionData: { currency: data.currency, advisorHistory: [] } });
+    }
+  }
+
+  // ── State handlers ─────────────────────────────────────────────────────────
+
+  async function handleInit(session: any, phoneNumber: string, input: string) {
     if (session.user) {
       await updateSession(session.id, { state: 'ADVISOR', sessionData: { ...session.sessionData, advisorHistory: [] } });
       await sendAdvisorButtons(
         phoneNumber,
-        `👋 ¡Hola de nuevo, *${session.user.username}*! 💰\n\nSoy tu asesor financiero. Puedes escribirme lo que necesites o usar los accesos rápidos:`,
+        `👋 ¡Hola de nuevo, *${session.user.username}*! 💰\n\nSoy tu asesor financiero. Escríbeme lo que necesites o usa los accesos rápidos:`,
         'general'
       );
       return;
@@ -284,15 +364,11 @@ export default ({ strapi }) => {
     }
 
     if (input === 'btn_login') {
-      await sender.sendText(
-        phoneNumber,
-        '❌ No encontramos una cuenta con este número.\n\n¿Deseas registrarte?'
-      );
+      await sender.sendText(phoneNumber, '❌ No encontramos una cuenta con este número.\n\n¿Deseas registrarte?');
       await sendWelcome(phoneNumber);
       return;
     }
 
-    // First contact or any other message → show welcome
     await sendWelcome(phoneNumber);
   }
 
@@ -302,73 +378,47 @@ export default ({ strapi }) => {
       await sender.sendText(phoneNumber, 'Por favor ingresa un nombre válido (mínimo 2 caracteres):');
       return;
     }
-
     const data: SessionData = { ...session.sessionData, name };
     await updateSession(session.id, { state: 'REGISTER_EMAIL', sessionData: data });
-
-    await sender.sendText(
-      phoneNumber,
-      `¡Hola *${name}*! 😊\n\n¿Cuál es tu correo electrónico?\n\nEjemplo: _correo@gmail.com_`
-    );
+    await sender.sendText(phoneNumber, `¡Hola *${name}*! 😊\n\n¿Cuál es tu correo electrónico?\n\nEjemplo: _correo@gmail.com_`);
   }
 
   async function handleRegisterEmail(session: any, phoneNumber: string, email: string) {
     email = email.trim().toLowerCase();
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-    if (!emailRegex.test(email)) {
-      await sender.sendText(
-        phoneNumber,
-        '❌ Correo inválido. Por favor ingresa un correo válido:\n\nEjemplo: _correo@gmail.com_'
-      );
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      await sender.sendText(phoneNumber, '❌ Correo inválido. Por favor ingresa un correo válido:\n\nEjemplo: _correo@gmail.com_');
       return;
     }
 
-    // Check if email already exists
-    const existing = await strapi.db
-      .query('plugin::users-permissions.user')
-      .findOne({ where: { email } });
-
+    const existing = await strapi.db.query('plugin::users-permissions.user').findOne({ where: { email } });
     if (existing) {
-      await sender.sendText(
-        phoneNumber,
-        `❌ El correo *${email}* ya está registrado.\n\nIngresa otro correo o escribe *cancelar* para volver al inicio.`
-      );
+      await sender.sendText(phoneNumber, `❌ El correo *${email}* ya está registrado.\n\nIngresa otro correo o escribe *cancelar* para volver al inicio.`);
       return;
     }
 
     const data: SessionData = { ...session.sessionData, email };
     await updateSession(session.id, { state: 'REGISTER_CURRENCY', sessionData: data });
-
-    await sender.sendList(
-      phoneNumber,
-      `✅ Correo guardado.\n\n💵 ¿Cuál es tu moneda principal?`,
-      'Seleccionar moneda',
-      CURRENCY_SECTIONS
-    );
+    await sender.sendList(phoneNumber, `✅ Correo guardado.\n\n💵 ¿Cuál es tu moneda principal?`, 'Seleccionar moneda', CURRENCY_SECTIONS);
   }
 
   async function createUserAndFinish(session: any, phoneNumber: string, data: SessionData) {
-    const name = data.name || 'Usuario';
+    const name     = data.name || 'Usuario';
     const currency = data.currency || 'USD';
 
     let user: any;
     try {
-      const role = await strapi.db
-        .query('plugin::users-permissions.role')
-        .findOne({ where: { type: 'authenticated' } });
-
+      const role = await strapi.db.query('plugin::users-permissions.role').findOne({ where: { type: 'authenticated' } });
       const tempPassword = Math.random().toString(36).substring(2, 8).toUpperCase() +
         Math.random().toString(36).substring(2, 5) + '1!';
 
       user = await strapi.plugin('users-permissions').service('user').add({
-        username: name,
-        email: data.email || `wa_${phoneNumber}@cashi.app`,
-        password: tempPassword,
-        provider: 'local',
-        confirmed: true,
-        blocked: false,
-        role: role?.id,
+        username:           name,
+        email:              data.email || `wa_${phoneNumber}@cashi.app`,
+        password:           tempPassword,
+        provider:           'local',
+        confirmed:          true,
+        blocked:            false,
+        role:               role?.id,
         phoneNumber,
         registrationSource: 'whatsapp',
       });
@@ -381,32 +431,29 @@ export default ({ strapi }) => {
     }
 
     await seedUserData(user.id, currency === 'MULTI' ? 'USD' : currency);
-
     await updateSession(session.id, { state: 'ADVISOR', sessionData: { ...data, advisorHistory: [] }, user: user.id });
 
-    const webUrl = process.env.NEXTJS_URL;
+    const webUrl  = process.env.NEXTJS_URL;
     const tempPwd = (data as any)._tempPassword;
 
     await sender.sendText(
       phoneNumber,
       `🎉 *¡Cuenta creada exitosamente!*\n\nBienvenido a *Cashi*, ${name}! 🎊\n\n` +
-      (webUrl ? `💻 *Accede también desde la web:*\n🔗 ${webUrl}\n\n` : '') +
+      (webUrl ? `💻 Accede también desde la web:\n🔗 ${webUrl}\n\n` : '') +
       `📧 Email: ${data.email}\n` +
       `🔑 Contraseña temporal: *${tempPwd}*\n\n` +
-      `⚠️ _Guarda esta contraseña. Puedes cambiarla en Configuración → Perfil._`
+      `⚠️ _Guarda esta contraseña. Puedes cambiarla en Configuración._`
     );
     await sendAdvisorButtons(
       phoneNumber,
-      `🤖 Soy tu asesor financiero. Puedes escribirme en lenguaje natural o usar los accesos rápidos:`,
+      `🤖 Soy tu asesor financiero. Escríbeme en lenguaje natural o usa los accesos rápidos:`,
       'general'
     );
   }
 
   async function handleRegisterCurrency(session: any, phoneNumber: string, buttonId: string) {
     if (!buttonId.startsWith('cur_')) {
-      await sender.sendList(phoneNumber, '💵 Por favor selecciona tu moneda:', 'Ver monedas', [
-...CURRENCY_SECTIONS,
-      ]);
+      await sender.sendList(phoneNumber, '💵 Por favor selecciona tu moneda:', 'Ver monedas', CURRENCY_SECTIONS);
       return;
     }
     const currency = buttonId.replace('cur_', '');
@@ -418,54 +465,49 @@ export default ({ strapi }) => {
     'hola', 'hi', 'hello', 'hey', 'buenas', 'buenos días', 'buenos dias',
     'buenas tardes', 'buenas noches', 'menu', 'menú', 'inicio', 'start',
     'empezar', 'volver', 'regresar', 'opciones', 'ayuda', 'help', '.',
-    'ok', 'ок', '👋',
+    'ok', 'ок', '👋', 'cancelar', 'salir', 'cancel',
+  ]);
+
+  const GREETING_TRIGGERS = new Set([
+    'hola', 'hi', 'hello', 'hey', 'buenas', 'buenos días', 'buenos dias',
+    'buenas tardes', 'buenas noches', 'qué tal', 'que tal', 'como estas',
+    'cómo estás', 'good morning', 'good afternoon', '👋',
   ]);
 
   async function handleMainMenu(session: any, phoneNumber: string, input: string) {
-    const name = session.user?.username || 'Usuario';
+    const name   = session.user?.username || 'Usuario';
     const txType = input === 'btn_expense' ? 'expense' : input === 'btn_income' ? 'income' : null;
 
     if (txType) {
-      const emoji = txType === 'expense' ? '💸' : '💰';
-      const label = txType === 'expense' ? 'Gasto' : 'Ingreso';
+      const emoji    = txType === 'expense' ? '💸' : '💰';
+      const label    = txType === 'expense' ? 'Gasto' : 'Ingreso';
       const newState = txType === 'expense' ? 'EXPENSE_AMOUNT' : 'INCOME_AMOUNT';
 
       await updateSession(session.id, {
-        state: newState,
+        state:       newState,
         sessionData: { ...session.sessionData, transactionType: txType },
       });
-
-      await sender.sendText(
-        phoneNumber,
-        `${emoji} *Registrar ${label}*\n\n¿Cuánto ${txType === 'expense' ? 'gastaste' : 'recibiste'}?\n\nEscribe el monto (ej: *50.00*)`
-      );
+      await sender.sendText(phoneNumber, `${emoji} *Registrar ${label}*\n\n¿Cuánto ${txType === 'expense' ? 'gastaste' : 'recibiste'}?\n\nEscribe el monto (ej: *50*, *150.00*)`);
       return;
     }
 
     if (input === 'btn_advisor') {
-      await updateSession(session.id, {
-        state: 'ADVISOR',
-        sessionData: { ...session.sessionData, advisorHistory: [] },
-      });
+      await updateSession(session.id, { state: 'ADVISOR', sessionData: { ...session.sessionData, advisorHistory: [] } });
       await sendAdvisorButtons(
         phoneNumber,
-        `🤖 *Asesor Financiero Cashi*\n\n¡Hola ${name}! Escríbeme lo que necesites — puedo registrar gastos, analizar tus finanzas y darte consejos.\n\nEjemplos:\n• _"gasté 50 en almuerzo"_\n• _"¿cómo voy este mes?"_\n• _"recibí 1500 de salario"_`,
+        `🤖 *Asesor Financiero*\n\n¡Hola ${name}! Escríbeme lo que necesites:\n\n• _"gasté 50 en almuerzo"_\n• _"¿cómo voy este mes?"_\n• _"recibí 1500 de salario"_`,
         'general'
       );
       return;
     }
 
-    // Saludos / palabras de menú → mostrar menú
     if (!input || MENU_TRIGGERS.has(input.trim().toLowerCase())) {
       await sendMainMenu(phoneNumber, name);
       return;
     }
 
-    // Texto libre → pasar a modo asesor IA
-    await updateSession(session.id, {
-      state: 'ADVISOR',
-      sessionData: { ...session.sessionData, advisorHistory: [] },
-    });
+    // Texto libre → modo asesor
+    await updateSession(session.id, { state: 'ADVISOR', sessionData: { ...session.sessionData, advisorHistory: [] } });
     await handleAdvisor(session, phoneNumber, input, false);
   }
 
@@ -479,21 +521,21 @@ export default ({ strapi }) => {
         const emoji  = txType === 'expense' ? '💸' : '💰';
         const label  = txType === 'expense' ? 'gastaste' : 'recibiste';
         await updateSession(session.id, {
-          state: txType === 'expense' ? 'EXPENSE_AMOUNT' : 'INCOME_AMOUNT',
+          state:       txType === 'expense' ? 'EXPENSE_AMOUNT' : 'INCOME_AMOUNT',
           sessionData: { ...session.sessionData, transactionType: txType, returnTo: 'ADVISOR' },
         });
-        await sender.sendText(phoneNumber, `${emoji} ¿Cuánto ${label}?\n\nEscribe el monto (ej: *50.00*)`);
+        await sender.sendText(phoneNumber, `${emoji} ¿Cuánto ${label}?\n\nEscribe el monto (ej: *50*, *150.00*)`);
         return;
       }
 
       if (input === 'btn_balance') {
         const accounts = await getUserAccounts(session.user.id);
-        const webUrl = process.env.NEXTJS_URL || 'https://cashi.la';
+        const webUrl   = process.env.NEXTJS_URL || 'https://cashi.la';
         if (!accounts.length) {
           await sendAdvisorButtons(phoneNumber, '📊 No tienes cuentas registradas aún.', 'general');
         } else {
           const lines = accounts
-            .map((a: any) => `🏦 *${a.name}*: ${(a.balance || 0).toFixed(2)} ${a.currency || 'USD'}`)
+            .map((a: any) => `🏦 *${a.name}*: ${(a.balance || 0).toFixed(2)} ${a.currency || ''}`.trim())
             .join('\n');
           await sender.sendCtaUrl(
             phoneNumber,
@@ -506,23 +548,34 @@ export default ({ strapi }) => {
       }
     }
 
-    // ── Comandos de menú ────────────────────────────────────────
-    if (MENU_TRIGGERS.has(input.trim().toLowerCase())) {
+    // ── Saludos / menú ──────────────────────────────────────────
+    const trimmed = input.trim().toLowerCase();
+    if (MENU_TRIGGERS.has(trimmed)) {
       await sendMainMenu(phoneNumber, name);
       return;
     }
 
+    // Saludo conversacional breve → respuesta cálida sin cargar contexto financiero
+    if (GREETING_TRIGGERS.has(trimmed)) {
+      await sendAdvisorButtons(
+        phoneNumber,
+        `¡Hola, ${name}! 😊💚\n\nTodo bien por aquí. ¿En qué te puedo ayudar hoy con tus finanzas?\n\nPuedes escribirme directamente lo que quieras, por ejemplo:\n• _"gasté 80 en comida"_\n• _"¿cómo voy este mes?"_`,
+        'general'
+      );
+      return;
+    }
+
     // ── Cargar contexto financiero ──────────────────────────────
-    const now = new Date();
+    const now          = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
     const [accounts, categories, recentTx, monthTx] = await Promise.all([
       getUserAccounts(session.user.id),
       strapi.db.query('api::category.category').findMany({ where: { user: session.user.id }, limit: 20 }),
       strapi.db.query('api::transaction.transaction').findMany({
-        where: { user: session.user.id },
-        orderBy: { date: 'desc' },
-        limit: 10,
+        where:    { user: session.user.id },
+        orderBy:  { date: 'desc' },
+        limit:    10,
         populate: ['category', 'account'],
       }),
       strapi.db.query('api::transaction.transaction').findMany({
@@ -532,7 +585,7 @@ export default ({ strapi }) => {
     ]);
 
     const monthlyExpenses = monthTx.filter((t: any) => t.type === 'expense').reduce((s: number, t: any) => s + (t.amount || 0), 0);
-    const monthlyIncome   = monthTx.filter((t: any) => t.type === 'income') .reduce((s: number, t: any) => s + (t.amount || 0), 0);
+    const monthlyIncome   = monthTx.filter((t: any) => t.type === 'income').reduce((s: number, t: any)  => s + (t.amount || 0), 0);
 
     const baseContext = {
       name,
@@ -542,23 +595,21 @@ export default ({ strapi }) => {
 
     const aiService = strapi.service('api::whatsapp-bot.ai');
 
-    // ── Intentar parsear intent de transacción ──────────────────
+    // ── Parsear intent ──────────────────────────────────────────
     const intent = await aiService.parseIntent(input, baseContext);
 
     if (intent.intent === 'register_expense' || intent.intent === 'register_income') {
       const txType = intent.intent === 'register_expense' ? 'expense' : 'income';
 
       if (!intent.amount) {
-        // Sin monto → flujo paso a paso
         await updateSession(session.id, {
-          state: txType === 'expense' ? 'EXPENSE_AMOUNT' : 'INCOME_AMOUNT',
+          state:       txType === 'expense' ? 'EXPENSE_AMOUNT' : 'INCOME_AMOUNT',
           sessionData: { ...session.sessionData, transactionType: txType, returnTo: 'ADVISOR' },
         });
         await sender.sendText(phoneNumber, `${txType === 'expense' ? '💸' : '💰'} ¿Cuánto ${txType === 'expense' ? 'gastaste' : 'recibiste'}?`);
         return;
       }
 
-      // Buscar categoría y cuenta
       const matchedCategory = intent.category_name
         ? categories.find((c: any) =>
             c.name.toLowerCase().includes(intent.category_name!.toLowerCase()) ||
@@ -576,20 +627,19 @@ export default ({ strapi }) => {
       }
 
       if (!matchedCategory) {
-        // Pedir categoría
         const filtered = categories.filter((c: any) => c.type === txType || c.type === 'both');
         await updateSession(session.id, {
           state: txType === 'expense' ? 'EXPENSE_CATEGORY' : 'INCOME_CATEGORY',
           sessionData: {
             ...session.sessionData,
             transactionType: txType,
-            amount: intent.amount,
-            accountId: matchedAccount.id,
-            accountName: matchedAccount.name,
-            returnTo: 'ADVISOR',
+            amount:          intent.amount,
+            accountId:       matchedAccount.id,
+            accountName:     matchedAccount.name,
+            returnTo:        'ADVISOR',
           },
         });
-        await sendCategorySelection(phoneNumber, filtered, txType as 'expense' | 'income', intent.amount, matchedAccount.currency || 'USD');
+        await sendCategorySelection(phoneNumber, filtered, txType as 'expense' | 'income', intent.amount, matchedAccount.currency || '');
         return;
       }
 
@@ -597,13 +647,13 @@ export default ({ strapi }) => {
       try {
         await strapi.db.query('api::transaction.transaction').create({
           data: {
-            amount:     intent.amount,
-            type:       txType,
+            amount:      intent.amount,
+            type:        txType,
             description: intent.description || input,
-            date:       new Date(),
-            account:    matchedAccount.id,
-            category:   matchedCategory.id,
-            user:       session.user.id,
+            date:        new Date(),
+            account:     matchedAccount.id,
+            category:    matchedCategory.id,
+            user:        session.user.id,
             whatsappMessageId: `wa_ai_${Date.now()}`,
           },
         });
@@ -611,18 +661,19 @@ export default ({ strapi }) => {
         const newBalance = (matchedAccount.balance || 0) + delta;
         await strapi.db.query('api::account.account').update({ where: { id: matchedAccount.id }, data: { balance: newBalance } });
 
-        const sign    = txType === 'expense' ? '-' : '+';
-        const emoji   = txType === 'expense' ? '💸' : '💰';
-        const currency = matchedAccount.currency || 'USD';
+        const sign     = txType === 'expense' ? '-' : '+';
+        const emoji    = txType === 'expense' ? '💸' : '💰';
+        const currency = matchedAccount.currency || '';
+        const cur      = displayCurrency(currency);
 
         await sendAdvisorButtons(
           phoneNumber,
           `✅ *${txType === 'expense' ? 'Gasto' : 'Ingreso'} registrado!*\n\n` +
-          `${emoji} ${sign}${intent.amount.toFixed(2)} ${currency}\n` +
+          `${emoji} ${sign}${intent.amount.toFixed(2)}${cur}\n` +
           `📂 ${matchedCategory.name}\n` +
           `🏦 ${matchedAccount.name}\n` +
           (intent.description ? `📝 ${intent.description}\n` : '') +
-          `\n💳 Nuevo saldo: *${newBalance.toFixed(2)} ${currency}*`,
+          `\n💳 Saldo: *${newBalance.toFixed(2)}${cur}*`,
           'after_tx'
         );
       } catch (err) {
@@ -634,12 +685,12 @@ export default ({ strapi }) => {
 
     if (intent.intent === 'view_balance') {
       const webUrl = process.env.NEXTJS_URL || 'https://cashi.la';
-      const lines = accounts.length
-        ? accounts.map((a: any) => `🏦 *${a.name}*: ${(a.balance || 0).toFixed(2)} ${a.currency || 'USD'}`).join('\n')
+      const lines  = accounts.length
+        ? accounts.map((a: any) => `🏦 *${a.name}*: ${(a.balance || 0).toFixed(2)} ${a.currency || ''}`.trim()).join('\n')
         : 'Sin cuentas registradas.';
       await sender.sendCtaUrl(
         phoneNumber,
-        `📊 *Tu Saldo Actual*\n\n${lines}\n\n_Ver el detalle completo en la app:_`,
+        `📊 *Tu Saldo Actual*\n\n${lines}\n\n_Ver detalle completo en la app:_`,
         '📱 Ir al Dashboard',
         `${webUrl}/dashboard`
       );
@@ -647,9 +698,9 @@ export default ({ strapi }) => {
     }
 
     if (intent.intent === 'view_summary') {
-      const webUrl = process.env.NEXTJS_URL || 'https://cashi.la';
-      const month = now.toLocaleString('es-MX', { month: 'long' });
-      const balance = monthlyIncome - monthlyExpenses;
+      const webUrl      = process.env.NEXTJS_URL || 'https://cashi.la';
+      const month       = now.toLocaleString('es-MX', { month: 'long' });
+      const balance     = monthlyIncome - monthlyExpenses;
       const balanceSign = balance >= 0 ? '+' : '';
       await sender.sendCtaUrl(
         phoneNumber,
@@ -665,7 +716,13 @@ export default ({ strapi }) => {
       return;
     }
 
-    // ── Consejo conversacional ──────────────────────────────────
+    // intent === 'general_question': AI ya tiene la respuesta en intent.answer
+    if (intent.intent === 'general_question' && intent.answer) {
+      await sendAdvisorButtons(phoneNumber, intent.answer, 'general');
+      return;
+    }
+
+    // ── Respuesta conversacional completa ───────────────────────
     const history: Array<{ role: 'user' | 'assistant'; content: string }> = session.sessionData?.advisorHistory || [];
 
     const advisorContext = {
@@ -696,18 +753,38 @@ export default ({ strapi }) => {
   }
 
   async function handleAmount(session: any, phoneNumber: string, text: string) {
-    const amount = parseAmount(text);
-    if (!amount) {
-      await sender.sendText(
+    // Universal escape
+    if (MENU_TRIGGERS.has(text.trim().toLowerCase())) {
+      await updateSession(session.id, {
+        state:       'ADVISOR',
+        sessionData: { currency: session.sessionData?.currency, advisorHistory: [] },
+      });
+      await sendAdvisorButtons(
         phoneNumber,
-        '❌ Monto inválido. Escribe solo el número (ej: *50.00*)'
+        `¿En qué te puedo ayudar, ${session.user?.username || 'Usuario'}?`,
+        'general'
       );
       return;
     }
 
-    const type = session.sessionData?.transactionType as 'expense' | 'income';
+    const amount = parseAmount(text);
+    if (!amount) {
+      await sender.sendText(
+        phoneNumber,
+        '❌ No entendí el monto. Escribe solo el número:\n\n*Ejemplos:* 50 · 150.50 · 1500\n\n_O escribe *menú* para cancelar._'
+      );
+      return;
+    }
+
+    const type     = session.sessionData?.transactionType as 'expense' | 'income';
     const data: SessionData = { ...session.sessionData, amount };
-    const currency = data.currency || 'USD';
+
+    // Resolve currency from first account (avoid showing MULTI)
+    let currency = data.currency || 'USD';
+    if (currency === 'MULTI') {
+      const accounts = await getUserAccounts(session.user.id);
+      currency = accounts[0]?.currency || 'USD';
+    }
 
     let categories = await getUserCategories(session.user.id, type);
     if (categories.length === 0) {
@@ -721,20 +798,24 @@ export default ({ strapi }) => {
   }
 
   async function handleCategory(session: any, phoneNumber: string, input: string) {
+    // Universal escape
+    if (session.sessionData && MENU_TRIGGERS.has(input.trim().toLowerCase())) {
+      await updateSession(session.id, { state: 'ADVISOR', sessionData: { currency: session.sessionData?.currency, advisorHistory: [] } });
+      await sendAdvisorButtons(phoneNumber, '¿En qué te puedo ayudar?', 'general');
+      return;
+    }
+
     if (!input.startsWith('cat_')) {
-      // Re-enviar la lista de categorías
-      const type = session.sessionData?.transactionType as 'expense' | 'income';
-      const amount = session.sessionData?.amount || 0;
+      const type     = session.sessionData?.transactionType as 'expense' | 'income';
+      const amount   = session.sessionData?.amount || 0;
       const currency = session.sessionData?.currency || 'USD';
-      const cats = await getUserCategories(session.user.id, type);
+      const cats     = await getUserCategories(session.user.id, type);
       await sendCategorySelection(phoneNumber, cats, type, amount, currency);
       return;
     }
 
     const categoryId = parseInt(input.replace('cat_', ''), 10);
-    const category = await strapi.db
-      .query('api::category.category')
-      .findOne({ where: { id: categoryId } });
+    const category   = await strapi.db.query('api::category.category').findOne({ where: { id: categoryId } });
 
     const data: SessionData = {
       ...session.sessionData,
@@ -742,37 +823,47 @@ export default ({ strapi }) => {
       categoryName: category?.name || 'Sin categoría',
     };
 
-    const type = data.transactionType!;
+    const type     = data.transactionType!;
     const newState = type === 'expense' ? 'EXPENSE_ACCOUNT' : 'INCOME_ACCOUNT';
     await updateSession(session.id, { state: newState, sessionData: data });
 
     const accounts = await getUserAccounts(session.user.id);
     if (accounts.length === 0) {
-      await sender.sendText(
-        phoneNumber,
-        '❌ No tienes cuentas registradas. Ve a la app web para crear una cuenta y luego vuelve aquí.'
-      );
-      await updateSession(session.id, { state: 'MAIN_MENU' });
-      await sendMainMenu(phoneNumber, session.user.username);
+      await sender.sendText(phoneNumber, '❌ No tienes cuentas. Ve a la app web para crear una cuenta.');
+      await updateSession(session.id, { state: 'ADVISOR', sessionData: { currency: data.currency, advisorHistory: [] } });
+      await sendAdvisorButtons(phoneNumber, '¿En qué más te puedo ayudar?', 'general');
       return;
     }
 
-    await sendAccountSelection(phoneNumber, accounts, data.categoryName!);
+    // If only one account → skip selection and save directly
+    if (accounts.length === 1) {
+      const acc = accounts[0];
+      const finalData: SessionData = { ...data, accountId: acc.id, accountName: acc.name };
+      await updateSession(session.id, { sessionData: finalData });
+      await saveTransaction(session, phoneNumber, finalData, null);
+      return;
+    }
+
+    await sendAccountSelection(phoneNumber, accounts, data.categoryName!, data.amount!, data.currency!);
   }
 
   async function handleAccount(session: any, phoneNumber: string, input: string) {
+    // Universal escape
+    if (MENU_TRIGGERS.has(input.trim().toLowerCase())) {
+      await updateSession(session.id, { state: 'ADVISOR', sessionData: { currency: session.sessionData?.currency, advisorHistory: [] } });
+      await sendAdvisorButtons(phoneNumber, '¿En qué te puedo ayudar?', 'general');
+      return;
+    }
+
     if (!input.startsWith('acc_')) {
-      // Re-enviar la lista de cuentas
       const categoryName = session.sessionData?.categoryName || 'Categoría';
-      const accounts = await getUserAccounts(session.user.id);
-      await sendAccountSelection(phoneNumber, accounts, categoryName);
+      const accounts     = await getUserAccounts(session.user.id);
+      await sendAccountSelection(phoneNumber, accounts, categoryName, session.sessionData?.amount || 0, session.sessionData?.currency || '');
       return;
     }
 
     const accountId = parseInt(input.replace('acc_', ''), 10);
-    const account = await strapi.db
-      .query('api::account.account')
-      .findOne({ where: { id: accountId } });
+    const account   = await strapi.db.query('api::account.account').findOne({ where: { id: accountId } });
 
     const data: SessionData = {
       ...session.sessionData,
@@ -780,91 +871,14 @@ export default ({ strapi }) => {
       accountName: account?.name || 'Sin cuenta',
     };
 
-    const type = data.transactionType!;
-    const newState = type === 'expense' ? 'EXPENSE_NOTES' : 'INCOME_NOTES';
-    await updateSession(session.id, { state: newState, sessionData: data });
-
-    await sender.sendText(
-      phoneNumber,
-      `🏦 Cuenta: *${account?.name}*\n\n¿Descripción? Escribe una nota breve o envía *no* para continuar:`
-    );
-  }
-
-  async function handleNotes(session: any, phoneNumber: string, text: string) {
-    const data: SessionData = { ...session.sessionData };
-    const notes = isSkip(text) ? null : text.trim();
-    const type = data.transactionType!;
-    const isExpense = type === 'expense';
-
-    try {
-      // Create transaction
-      await strapi.db.query('api::transaction.transaction').create({
-        data: {
-          amount: data.amount,
-          type,
-          description: notes || `${isExpense ? 'Gasto' : 'Ingreso'} vía WhatsApp`,
-          date: new Date(),
-          account: data.accountId,
-          category: data.categoryId,
-          user: session.user.id,
-          whatsappMessageId: `wa_${Date.now()}`,
-        },
-      });
-
-      // Update account balance
-      const account = await strapi.db
-        .query('api::account.account')
-        .findOne({ where: { id: data.accountId } });
-
-      const balanceDelta = isExpense ? -(data.amount!) : data.amount!;
-      const newBalance = (account.balance || 0) + balanceDelta;
-
-      await strapi.db.query('api::account.account').update({
-        where: { id: data.accountId },
-        data: { balance: newBalance },
-      });
-
-      const currency = account.currency || data.currency || 'USD';
-      const sign = isExpense ? '-' : '+';
-      const emoji = isExpense ? '💸' : '💰';
-      const label = isExpense ? 'Gasto' : 'Ingreso';
-
-      await sender.sendText(
-        phoneNumber,
-        `✅ *${label} registrado!*\n\n` +
-        `${emoji} ${sign}${data.amount!.toFixed(2)} ${currency}\n` +
-        `📂 ${data.categoryName}\n` +
-        `🏦 ${data.accountName}` +
-        (notes ? `\n📝 ${notes}` : '') +
-        `\n\n💳 Saldo actual: *${newBalance.toFixed(2)} ${currency}*`
-      );
-    } catch (err) {
-      strapi.log.error('[WhatsApp] Error saving transaction:', err);
-      await sender.sendText(
-        phoneNumber,
-        '❌ Error al registrar. Por favor intenta de nuevo.'
-      );
-    }
-
-    // Reset to main menu
-    const returnTo = data.returnTo as string | undefined;
-    if (returnTo === 'ADVISOR') {
-      await updateSession(session.id, {
-        state: 'ADVISOR',
-        sessionData: { currency: data.currency, advisorHistory: session.sessionData?.advisorHistory || [] },
-      });
-      await sendAdvisorButtons(phoneNumber, '¿En qué más te puedo ayudar?', 'after_tx');
-    } else {
-      await updateSession(session.id, { state: 'MAIN_MENU', sessionData: { currency: data.currency } });
-      await sendMainMenu(phoneNumber, session.user.username);
-    }
+    // Save immediately — no extra notes step
+    await saveTransaction(session, phoneNumber, data, null);
   }
 
   // ── Main entry point ───────────────────────────────────────────────────────
 
   return {
     async handle(phoneNumber: string, message: ParsedMessage): Promise<void> {
-      // Get or create session
       let session = await getSession(phoneNumber);
       if (!session) {
         session = await createSession(phoneNumber);
@@ -873,11 +887,26 @@ export default ({ strapi }) => {
       }
 
       const { type: msgType, text: msgText, buttonId } = message;
-      // Unified input: for text messages use the text, for button/list replies use the ID
       const input = msgType === 'text' ? msgText : buttonId;
       const state: string = session.state;
 
       strapi.log.debug(`[WhatsApp] phone=${phoneNumber} state=${state} input="${input}"`);
+
+      // ── Universal escape: any mid-flow state → go to Advisor/Menu ──────────
+      const isMidFlow = ['EXPENSE_AMOUNT','INCOME_AMOUNT','EXPENSE_CATEGORY','INCOME_CATEGORY','EXPENSE_ACCOUNT','INCOME_ACCOUNT'].includes(state);
+
+      if (msgType === 'text' && session.user && isMidFlow && MENU_TRIGGERS.has(msgText.trim().toLowerCase())) {
+        await updateSession(session.id, {
+          state:       'ADVISOR',
+          sessionData: { currency: session.sessionData?.currency, advisorHistory: [] },
+        });
+        await sendAdvisorButtons(
+          phoneNumber,
+          `¿En qué te puedo ayudar, ${session.user.username}? 💚`,
+          'general'
+        );
+        return;
+      }
 
       try {
         switch (state) {
@@ -915,7 +944,7 @@ export default ({ strapi }) => {
           case 'INCOME_AMOUNT':
             if (msgType !== 'text') {
               const label = state === 'EXPENSE_AMOUNT' ? 'gastaste' : 'recibiste';
-              await sender.sendText(phoneNumber, `¿Cuánto ${label}? Escribe el monto (ej: *50.00*)`);
+              await sender.sendText(phoneNumber, `¿Cuánto ${label}? Escribe el monto (ej: *50*, *150.00*)`);
               return;
             }
             return await handleAmount(session, phoneNumber, msgText);
@@ -928,31 +957,20 @@ export default ({ strapi }) => {
           case 'INCOME_ACCOUNT':
             return await handleAccount(session, phoneNumber, input);
 
-          case 'EXPENSE_NOTES':
-          case 'INCOME_NOTES':
-            if (msgType !== 'text') {
-              await sender.sendText(
-                phoneNumber,
-                '¿Descripción? Escribe una nota breve o envía *no* para continuar:'
-              );
-              return;
-            }
-            return await handleNotes(session, phoneNumber, msgText);
-
           default:
-            strapi.log.warn(`[WhatsApp] Unknown state: ${state}, resetting to MAIN_MENU`);
-            await updateSession(session.id, { state: 'MAIN_MENU' });
+            // Estado desconocido → reset a Advisor
+            strapi.log.warn(`[WhatsApp] Unknown state: ${state}, resetting`);
             if (session.user) {
-              await sendMainMenu(phoneNumber, session.user.username);
+              await updateSession(session.id, { state: 'ADVISOR', sessionData: { advisorHistory: [] } });
+              await sendAdvisorButtons(phoneNumber, '¿En qué te puedo ayudar?', 'general');
             } else {
+              await updateSession(session.id, { state: 'INIT', sessionData: {} });
               await sendWelcome(phoneNumber);
             }
         }
       } catch (err) {
         strapi.log.error('[WhatsApp] Unhandled error in conversation handler:', err);
-        await sender
-          .sendText(phoneNumber, '⚠️ Ocurrió un error. Por favor escribe *hola* para reiniciar.')
-          .catch(() => {});
+        await sender.sendText(phoneNumber, '⚠️ Ocurrió un error. Escribe *hola* para continuar.');
       }
     },
   };
