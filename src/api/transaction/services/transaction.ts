@@ -16,6 +16,7 @@ export default factories.createCoreService('api::transaction.transaction' as any
       }),
       strapi.entityService.findMany('api::transaction.transaction', {
         filters: { ...baseFilters, type: 'expense' },
+        populate: ['category'],
       }),
       strapi.entityService.findMany('api::transaction.transaction', {
         filters: baseFilters,

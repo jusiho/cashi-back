@@ -14,7 +14,8 @@
       "Bash(grep -n \"CURRENCIES\\\\b\" \"c:/Users/pierr/Desktop/strapi project/cashi-back/dist/src/api/whatsapp-bot/services/\"*.js)",
       "Bash(ls \"c:/Users/pierr/Desktop/strapi project/cashi-back/tsconfig\"*)",
       "Bash(ls \"c:/Users/pierr/Desktop/strapi project/cashi-back/\"*.json)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(xargs cat *)"
     ],
     "additionalDirectories": [
       "c:\\Users\\pierr\\Desktop\\strapi project\\cashi-back\\src\\extensions\\users-permissions\\content-types"
