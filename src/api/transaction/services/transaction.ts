@@ -19,7 +19,7 @@ export default factories.createCoreService('api::transaction.transaction' as any
       }),
       strapi.entityService.findMany('api::transaction.transaction', {
         filters: baseFilters,
-        populate: ['category'],
+        populate: ['category', 'account'],
         sort: { date: 'desc' },
         limit: 10,
       }),
